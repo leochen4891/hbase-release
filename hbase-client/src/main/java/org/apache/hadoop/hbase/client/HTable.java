@@ -877,6 +877,10 @@ public class HTable implements HTableInterface, RegionLocator {
    */
   @Override
   public Result[] get(List<Get> gets) throws IOException {
+
+    LOG.info("----------------> new log <--------------------");
+    LOG.info("Consistency = " + gets.get(0).getConsistency());
+
     if (gets.size() == 1) {
       return new Result[]{get(gets.get(0))};
     }
