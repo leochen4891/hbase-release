@@ -851,11 +851,17 @@ class AsyncProcess {
       Map<ServerName, MultiAction<Row>> actionsByServer =
           new HashMap<ServerName, MultiAction<Row>>();
 
+      long startTime = System.currentTimeMillis();
       boolean isReplica = false;
       List<Action<Row>> unknownReplicaActions = null;
       for (Action<Row> action : currentActions) {
+        LOG.info("action row = " + Bytes.toString(action.getAction().getRow()));
         RegionLocations locs = findAllLocationsOrFail(action, true);
+
+        LOG.info("locs.size = " + (null == locs ?"null":locs.size()));
+
         if (locs == null) continue;
+
         boolean isReplicaAction = !RegionReplicaUtil.isDefaultReplica(action.getReplicaId());
         if (isReplica && !isReplicaAction) {
           // This is the property of the current implementation, not a requirement.
@@ -863,12 +869,16 @@ class AsyncProcess {
         }
         isReplica = isReplicaAction;
         HRegionLocation loc = locs.getRegionLocation(action.getReplicaId());
+
+        LOG.info("replicaId = " + action.getReplicaId() + ", loc = " + loc.getServerName());
+
         if (loc == null || loc.getServerName() == null) {
           if (isReplica) {
             if (unknownReplicaActions == null) {
               unknownReplicaActions = new ArrayList<Action<Row>>();
             }
             unknownReplicaActions.add(action);
+            LOG.info("added to unknownReplicaActions");
           } else {
             // TODO: relies on primary location always being fetched
             manageLocationError(action, null);
@@ -876,6 +886,7 @@ class AsyncProcess {
         } else {
           byte[] regionName = loc.getRegionInfo().getRegionName();
           addAction(loc.getServerName(), regionName, action, actionsByServer, nonceGroup);
+          LOG.info("added to actionsByServer");
         }
       }
       boolean doStartReplica = (numAttempt == 1 && !isReplica && hasAnyReplicaGets);
@@ -883,21 +894,21 @@ class AsyncProcess {
 
       if (!actionsByServer.isEmpty()) {
         // If this is a first attempt to group and send, no replicas, we need replica thread.
-        sendMultiAction(actionsByServer, numAttempt, (doStartReplica && !hasUnknown)
-            ? currentActions : null, numAttempt > 1 && !hasUnknown);
+        LOG.info("call sendMultiAction");
+        sendMultiAction(actionsByServer, numAttempt, (doStartReplica && !hasUnknown) ? currentActions : null, numAttempt > 1 && !hasUnknown);
       }
 
       if (hasUnknown) {
         actionsByServer = new HashMap<ServerName, MultiAction<Row>>();
         for (Action<Row> action : unknownReplicaActions) {
           HRegionLocation loc = getReplicaLocationOrFail(action);
+          LOG.info("groupAndSendMultiAction, unknown action row = " + Bytes.toString(action.getAction().getRow()) + ", loc = " + (null == loc? "null" : loc.getServerName()));
           if (loc == null) continue;
           byte[] regionName = loc.getRegionInfo().getRegionName();
           addAction(loc.getServerName(), regionName, action, actionsByServer, nonceGroup);
         }
         if (!actionsByServer.isEmpty()) {
-          sendMultiAction(
-              actionsByServer, numAttempt, doStartReplica ? currentActions : null, true);
+          sendMultiAction( actionsByServer, numAttempt, doStartReplica ? currentActions : null, true);
         }
       }
     }
@@ -963,6 +974,9 @@ class AsyncProcess {
         ServerName server = e.getKey();
         MultiAction<Row> multiAction = e.getValue();
         incTaskCounters(multiAction.getRegions(), server);
+
+        LOG.info("lchen403: sendMultiAction, server = " + server + ", actions size = " + multiAction.size());
+
         Collection<? extends Runnable> runnables = getNewMultiActionRunnable(server, multiAction,
             numAttempt);
         // make sure we correctly count the number of runnables before we try to reuse the send

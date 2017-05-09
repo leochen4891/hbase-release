@@ -878,11 +878,13 @@ public class HTable implements HTableInterface, RegionLocator {
   @Override
   public Result[] get(List<Get> gets) throws IOException {
 
-    LOG.info("----------------> new log <--------------------");
-    LOG.info("Consistency = " + gets.get(0).getConsistency());
+    long startTime = System.currentTimeMillis();
+    LOG.info("lchen403:" + startTime + ", HTable get, Consistency = " + gets.get(0).getConsistency());
 
     if (gets.size() == 1) {
-      return new Result[]{get(gets.get(0))};
+      Result[] ret = new Result[]{get(gets.get(0))};
+      LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, HTable get, size is 1");
+      return ret;
     }
     try {
       Object [] r1 = batch((List)gets);
@@ -895,8 +897,11 @@ public class HTable implements HTableInterface, RegionLocator {
         results[i++] = (Result) o;
       }
 
+      LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, HTable get, return successfully");
+
       return results;
     } catch (InterruptedException e) {
+      LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, HTable get, throw " + e.getMessage());
       throw (InterruptedIOException)new InterruptedIOException().initCause(e);
     }
   }
@@ -907,8 +912,12 @@ public class HTable implements HTableInterface, RegionLocator {
   @Override
   public void batch(final List<? extends Row> actions, final Object[] results)
       throws InterruptedException, IOException {
+	long startTime = System.currentTimeMillis();
+    LOG.info("lchen403:" + startTime + ", batch started");
     AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, actions, null, results);
+    LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, batch AsyncRequestFutures created");
     ars.waitUntilDone();
+    LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, batch AsyncRequestFutures done");
     if (ars.hasError()) {
       throw ars.getErrors();
     }

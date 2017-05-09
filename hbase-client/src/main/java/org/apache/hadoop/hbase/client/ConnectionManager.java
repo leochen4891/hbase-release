@@ -1150,16 +1150,23 @@ class ConnectionManager {
     public RegionLocations locateRegion(final TableName tableName,
       final byte [] row, boolean useCache, boolean retry, int replicaId)
     throws IOException {
+
+      LOG.info("locateRegion, table = " + tableName.getNameAsString() + ", row = " + Bytes.toString(row) + ", replicaID = " + replicaId);
+
       if (this.closed) throw new IOException(toString() + " closed");
       if (tableName== null || tableName.getName().length == 0) {
         throw new IllegalArgumentException(
             "table name cannot be null or zero length");
       }
       if (tableName.equals(TableName.META_TABLE_NAME)) {
-        return locateMeta(tableName, useCache, replicaId);
+      	RegionLocations ret =  locateMeta(tableName, useCache, replicaId);
+        LOG.info("locateMeta, loc.size = " + ret.size());
+        return ret;
       } else {
         // Region not in the cache - have to go to the meta RS
-        return locateRegionInMeta(tableName, row, useCache, retry, replicaId);
+      	RegionLocations ret = locateRegionInMeta(tableName, row, useCache, retry, replicaId);
+        LOG.info("locateRegion in Meta, loc.size = " + ret.size());
+        return ret;
       }
     }
 
@@ -1173,9 +1180,13 @@ class ConnectionManager {
       if (useCache) {
         locations = getCachedLocation(tableName, metaCacheKey);
         if (locations != null && locations.getRegionLocation(replicaId) != null) {
+          LOG.info("locateMeta, hit cache, loc.size = " + locations.size());
           return locations;
         }
       }
+      
+      LOG.info("locateMeta, tableName = " + tableName + ", useCache = " + useCache + ", replicaId = " + replicaId);
+      LOG.info(Thread.currentThread().getStackTrace().toString());
 
       // only one thread should do the lookup.
       synchronized (metaRegionLock) {
@@ -1184,6 +1195,7 @@ class ConnectionManager {
         if (useCache) {
           locations = getCachedLocation(tableName, metaCacheKey);
           if (locations != null && locations.getRegionLocation(replicaId) != null) {
+          	LOG.info("locateMeta, hit cache in metaRegionLock, loc.size = " + locations.size());
             return locations;
           }
         }
@@ -1191,6 +1203,7 @@ class ConnectionManager {
         // Look up from zookeeper
         locations = this.registry.getMetaRegionLocation();
         if (locations != null) {
+          LOG.info("locateMeta, from zookeeper, loc.size = " + locations.size());
           cacheLocation(tableName, locations);
         }
       }
@@ -1323,6 +1336,7 @@ class ConnectionManager {
           }
           if (tries < localNumRetries - 1) {
             if (LOG.isDebugEnabled()) {
+            	
               LOG.debug("locateRegionInMeta parentTable=" +
                   TableName.META_TABLE_NAME + ", metaLocation=" +
                 ", attempt=" + tries + " of " +
