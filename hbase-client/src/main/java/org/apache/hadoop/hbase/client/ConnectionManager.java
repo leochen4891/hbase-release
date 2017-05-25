@@ -1151,7 +1151,7 @@ class ConnectionManager {
       final byte [] row, boolean useCache, boolean retry, int replicaId)
     throws IOException {
 
-      LOG.info("locateRegion, table = " + tableName.getNameAsString() + ", row = " + Bytes.toString(row) + ", replicaID = " + replicaId);
+      LOG.info("started locateRegion, table = " + tableName.getNameAsString() + ", row = " + Bytes.toString(row) + ", replicaID = " + replicaId);
 
       if (this.closed) throw new IOException(toString() + " closed");
       if (tableName== null || tableName.getName().length == 0) {
@@ -1160,12 +1160,12 @@ class ConnectionManager {
       }
       if (tableName.equals(TableName.META_TABLE_NAME)) {
       	RegionLocations ret =  locateMeta(tableName, useCache, replicaId);
-        LOG.info("locateMeta, loc.size = " + ret.size());
+        LOG.info("locateMeta returned, loc.size = " + ret.size());
         return ret;
       } else {
         // Region not in the cache - have to go to the meta RS
       	RegionLocations ret = locateRegionInMeta(tableName, row, useCache, retry, replicaId);
-        LOG.info("locateRegion in Meta, loc.size = " + ret.size());
+        LOG.info("locateRegionInMeta returned, loc.size = " + ret.size());
         return ret;
       }
     }
@@ -1185,28 +1185,40 @@ class ConnectionManager {
         }
       }
       
-      LOG.info("locateMeta, tableName = " + tableName + ", useCache = " + useCache + ", replicaId = " + replicaId);
-      LOG.info(Thread.currentThread().getStackTrace().toString());
+			LOG.info("locateMeta, tableName = " + tableName + ", useCache = " + useCache
+					+ ", replicaId = " + replicaId);
+			System.out.println("Printing stack trace:");
+			StackTraceElement[] elements = Thread.currentThread().getStackTrace();
+			for (int i = 1; i < elements.length; i++) {
+				StackTraceElement s = elements[i];
+				System.out.println("\tat " + s.getClassName() + "." + s.getMethodName() + "("
+						+ s.getFileName() + ":" + s.getLineNumber() + ")");
+			}
 
       // only one thread should do the lookup.
       synchronized (metaRegionLock) {
+       	LOG.info("locateMeta, entering the metaRegionLock");
         // Check the cache again for a hit in case some other thread made the
         // same query while we were waiting on the lock.
         if (useCache) {
+       	  LOG.info("locateMeta, in metaRegionLcok useCache");
           locations = getCachedLocation(tableName, metaCacheKey);
           if (locations != null && locations.getRegionLocation(replicaId) != null) {
-          	LOG.info("locateMeta, hit cache in metaRegionLock, loc.size = " + locations.size());
+          	LOG.info("locateMeta, hit cache in metaRegionLock returned, loc.size = " + locations.size());
             return locations;
           }
         }
 
         // Look up from zookeeper
+     	LOG.info("locateMeta, before querying zookeeper");
         locations = this.registry.getMetaRegionLocation();
+     	LOG.info("locateMeta, loc returned from zookeeper, loc = " + locations.toString());
         if (locations != null) {
-          LOG.info("locateMeta, from zookeeper, loc.size = " + locations.size());
+          LOG.info("locateMeta, from zookeeper returned, loc.size = " + locations.size());
           cacheLocation(tableName, locations);
         }
       }
+      LOG.info("locateMeta, function returning locations = " + locations.toString());
       return locations;
     }
 
@@ -1220,6 +1232,7 @@ class ConnectionManager {
       // If we are supposed to be using the cache, look in the cache to see if
       // we already have the region.
       if (useCache) {
+        LOG.info("locateRegionInMeta: using cache, first try");
         RegionLocations locations = getCachedLocation(tableName, row);
         if (locations != null && locations.getRegionLocation(replicaId) != null) {
           return locations;
@@ -1249,6 +1262,7 @@ class ConnectionManager {
               " after " + localNumRetries + " tries.");
         }
         if (useCache) {
+          LOG.info("locateRegionInMeta: using cache, try = " + tries);
           RegionLocations locations = getCachedLocation(tableName, row);
           if (locations != null && locations.getRegionLocation(replicaId) != null) {
             return locations;
@@ -1256,6 +1270,7 @@ class ConnectionManager {
         } else {
           // If we are not supposed to be using the cache, delete any existing cached location
           // so it won't interfere.
+          LOG.info("locateRegionInMeta, clearing meta cache, table = " + tableName + ", row = " + Bytes.toString(row));
           metaCache.clearCache(tableName, row);
         }
 

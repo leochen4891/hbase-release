@@ -592,19 +592,23 @@ class AsyncProcess {
 
       @Override
       public void run() {
+    	LOG.info("lchen403:ReplicaCallIssuingRunnable run started");
         boolean done = false;
         if (primaryCallTimeoutMicroseconds > 0) {
           try {
+        	LOG.info("lchen403:ReplicaCallIssuingRunnable waiting for " + primaryCallTimeoutMicroseconds/1000 + " ms");
             done = waitUntilDone(startTime * 1000L + primaryCallTimeoutMicroseconds);
           } catch (InterruptedException ex) {
             LOG.error("Replica thread was interrupted - no replica calls: " + ex.getMessage());
             return;
           }
         }
+       	LOG.info("lchen403:ReplicaCallIssuingRunnable done waiting for the primary timeout");
         if (done) return; // Done within primary timeout
         Map<ServerName, MultiAction<Row>> actionsByServer =
             new HashMap<ServerName, MultiAction<Row>>();
         List<Action<Row>> unknownLocActions = new ArrayList<Action<Row>>();
+       	LOG.info("lchen403:ReplicaCallIssuingRunnable started adding replica actions");
         if (replicaGetIndices == null) {
           for (int i = 0; i < results.length; ++i) {
             addReplicaActions(i, actionsByServer, unknownLocActions);
@@ -614,16 +618,23 @@ class AsyncProcess {
             addReplicaActions(replicaGetIndice, actionsByServer, unknownLocActions);
           }
         }
+
+        LOG.info("lchen403:ReplicaCallIssuingRunnable actionsByServer.size = " + actionsByServer.size());
+        LOG.info("lchen403:ReplicaCallIssuingRunnable unknownLocActions.size = " + unknownLocActions.size());
+
         if (!actionsByServer.isEmpty()) {
+          LOG.info("lchen403:ReplicaCallIssuingRunnable before sendMultiAction");
           sendMultiAction(actionsByServer, 1, null, unknownLocActions.isEmpty());
         }
         if (!unknownLocActions.isEmpty()) {
           actionsByServer = new HashMap<ServerName, MultiAction<Row>>();
           for (Action<Row> action : unknownLocActions) {
+            LOG.info("lchen403:ReplicaCallIssuingRunnable addReplicaActionsAgain, row = " + Bytes.toString(action.getAction().getRow()));
             addReplicaActionsAgain(action, actionsByServer);
           }
           // Some actions may have completely failed, they are handled inside addAgain.
           if (!actionsByServer.isEmpty()) {
+            LOG.info("lchen403:ReplicaCallIssuingRunnable sendMultiAction for unknownLocActions");
             sendMultiAction(actionsByServer, 1, null, true);
           }
         }
@@ -636,9 +647,20 @@ class AsyncProcess {
        */
       private void addReplicaActions(int index, Map<ServerName, MultiAction<Row>> actionsByServer,
           List<Action<Row>> unknownReplicaActions) {
-        if (results[index] != null) return; // opportunistic. Never goes from non-null to null.
+
         Action<Row> action = initialActions.get(index);
+        LOG.info("lchen403:addReplicaActions, row = " + Bytes.toString(action.getAction().getRow()));
+
+        LOG.info("lchen403:addReplicaActions, result[" + index + "] = "
+        		+ (results[index]==null?"null":results[index].toString()));
+
+        if (results[index] != null) return; // opportunistic. Never goes from non-null to null.
+
+        LOG.info("lchen403:addReplicaActions, before findAllLocationsOrFail");
         RegionLocations loc = findAllLocationsOrFail(action, true);
+        LOG.info("lchen403:addReplicaActions, findAllLocationsOrFail returned"
+        		+ ", loc.size = " + loc.size());
+
         if (loc == null) return;
         HRegionLocation[] locs = loc.getRegionLocations();
         if (locs.length == 1) {
@@ -646,6 +668,9 @@ class AsyncProcess {
           return;
         }
         synchronized (replicaResultLock) {
+          LOG.info("lchen403:addReplicaActions, inside replicaResultLock");
+          LOG.info("lchen403:addReplicaActions, results[" + index + "] = " 
+        		+ (results[index]==null?"null":results[index].toString()));
           // Don't run replica calls if the original has finished. We could do it e.g. if
           // original has already failed before first replica call (unlikely given retries),
           // but that would require additional synchronization w.r.t. returning to caller.
@@ -653,6 +678,7 @@ class AsyncProcess {
           // We set the number of calls here. After that any path must call setResult/setError.
           // True even for replicas that are not found - if we refuse to send we MUST set error.
           results[index] = new ReplicaResultState(locs.length);
+          LOG.info("lchen403:addReplicaActions, results[" + index + "] = new ReplicaResultState(" + locs.length + ")");
         }
         for (int i = 1; i < locs.length; ++i) {
           Action<Row> replicaAction = new Action<Row>(action, i);
@@ -686,10 +712,21 @@ class AsyncProcess {
       private final int numAttempt;
       private final ServerName server;
       private final Set<MultiServerCallable<Row>> callsInProgress;
+      private String regionsStr;
 
       private SingleServerRequestRunnable(
           MultiAction<Row> multiAction, int numAttempt, ServerName server,
           Set<MultiServerCallable<Row>> callsInProgress) {
+    	StringBuilder sb = new StringBuilder();
+    	for (byte[] region : multiAction.getRegions()) {
+    		sb.append(Bytes.toString(region) + "\n");
+    	}
+    	regionsStr = sb.toString();
+    	LOG.info("lchen403:SingleServerRequestRunnable created, server = " + server.getServerName()
+    			+ ", numAttempt = " + numAttempt 
+    			+ ", regions = " + regionsStr);
+
+
         this.multiAction = multiAction;
         this.numAttempt = numAttempt;
         this.server = server;
@@ -705,7 +742,19 @@ class AsyncProcess {
           try {
             RpcRetryingCaller<MultiResponse> caller = createCaller(callable);
             if (callsInProgress != null) callsInProgress.add(callable);
+            
+            LOG.info("lchen403:SingleServerRequestRunnable, before calling caller.CallWithoutRetries" 
+            		+ ", table = " + tableName.getNameAsString()
+            		+ ", server = " +  server.getServerName() 
+            		+ ", regions = " + regionsStr);
             res = caller.callWithoutRetries(callable, timeout);
+
+            LOG.info("lchen403:SingleServerRequestRunnable, caller.CallWithoutRetries returned"
+            		+ ", res = " + (null == res?"null":res.toString())
+            		+ ", table = " + tableName.getNameAsString()
+            		+ ", server = " + server.getServerName() 
+            		+ ", regions = " + regionsStr);
+            		
 
             if (res == null) {
               // Cancelled
@@ -733,6 +782,11 @@ class AsyncProcess {
                   + tableName + " processing for " + server, t);
               throw new RuntimeException(t);
         } finally {
+          LOG.info("lchen403:SingleServerRequestRunnable, finally"
+            		+ ", table = " + tableName.getNameAsString()
+            		+ ", server = " + server.getServerName() 
+            		+ ", regions = " +regionsStr);
+
           decTaskCounters(multiAction.getRegions(), server);
           if (callsInProgress != null && callable != null) {
             callsInProgress.remove(callable);
@@ -855,10 +909,9 @@ class AsyncProcess {
       boolean isReplica = false;
       List<Action<Row>> unknownReplicaActions = null;
       for (Action<Row> action : currentActions) {
-        LOG.info("action row = " + Bytes.toString(action.getAction().getRow()));
+        LOG.info("lchen403:groupAndSendMultiAction, before calling findAllLocationsOrFail, action row = " + Bytes.toString(action.getAction().getRow()));
         RegionLocations locs = findAllLocationsOrFail(action, true);
-
-        LOG.info("locs.size = " + (null == locs ?"null":locs.size()));
+        LOG.info("lchen403:groupAndSendMultiAction, findAllLocationsOrFail returned locs.size = " + (null == locs ?"null":locs.size()));
 
         if (locs == null) continue;
 
@@ -868,9 +921,14 @@ class AsyncProcess {
           throw new AssertionError("Replica and non-replica actions in the same retry");
         }
         isReplica = isReplicaAction;
+        LOG.info("lchen403:groupAndSendMultiAction, before calling getRegionLocation" 
+        	+ ", action row = " + Bytes.toString(action.getAction().getRow()) 
+        	+ ", replicaId = " + action.getReplicaId());
         HRegionLocation loc = locs.getRegionLocation(action.getReplicaId());
-
-        LOG.info("replicaId = " + action.getReplicaId() + ", loc = " + loc.getServerName());
+        LOG.info("lchen403:groupAndSendMultiAction, getRegionLocation returned, " 
+        	+ ", action row = " + Bytes.toString(action.getAction().getRow()) 
+        	+ ", replicaId = " + action.getReplicaId()
+        	+ ", loc = " + loc.getServerName());
 
         if (loc == null || loc.getServerName() == null) {
           if (isReplica) {
@@ -878,7 +936,7 @@ class AsyncProcess {
               unknownReplicaActions = new ArrayList<Action<Row>>();
             }
             unknownReplicaActions.add(action);
-            LOG.info("added to unknownReplicaActions");
+            LOG.info("lchen403:groupAndSendMultiAction, added to unknownReplicaActions");
           } else {
             // TODO: relies on primary location always being fetched
             manageLocationError(action, null);
@@ -886,23 +944,28 @@ class AsyncProcess {
         } else {
           byte[] regionName = loc.getRegionInfo().getRegionName();
           addAction(loc.getServerName(), regionName, action, actionsByServer, nonceGroup);
-          LOG.info("added to actionsByServer");
+          LOG.info("lchen403:groupAndSendMultiAction, added to actionsByServer");
         }
       }
       boolean doStartReplica = (numAttempt == 1 && !isReplica && hasAnyReplicaGets);
       boolean hasUnknown = unknownReplicaActions != null && !unknownReplicaActions.isEmpty();
 
+      LOG.info("lchen403:groupAndSendMultiAction, doStartReplica = " + doStartReplica);
+      LOG.info("lchen403:groupAndSendMultiAction, hasUnknown = " + hasUnknown);
+
       if (!actionsByServer.isEmpty()) {
         // If this is a first attempt to group and send, no replicas, we need replica thread.
-        LOG.info("call sendMultiAction");
+        LOG.info("lchen403:groupAndSendMultiAction, before sendMultiAction, numAttempt = " + numAttempt);
         sendMultiAction(actionsByServer, numAttempt, (doStartReplica && !hasUnknown) ? currentActions : null, numAttempt > 1 && !hasUnknown);
+        LOG.info("lchen403:groupAndSendMultiAction, sendMultiAction returned");
       }
 
       if (hasUnknown) {
+        LOG.info("lchen403:groupAndSendMultiAction, has unknown");
         actionsByServer = new HashMap<ServerName, MultiAction<Row>>();
         for (Action<Row> action : unknownReplicaActions) {
           HRegionLocation loc = getReplicaLocationOrFail(action);
-          LOG.info("groupAndSendMultiAction, unknown action row = " + Bytes.toString(action.getAction().getRow()) + ", loc = " + (null == loc? "null" : loc.getServerName()));
+          LOG.info("lchen403:groupAndSendMultiAction, unknown action row = " + Bytes.toString(action.getAction().getRow()) + ", loc = " + (null == loc? "null" : loc.getServerName()));
           if (loc == null) continue;
           byte[] regionName = loc.getRegionInfo().getRegionName();
           addAction(loc.getServerName(), regionName, action, actionsByServer, nonceGroup);
@@ -975,15 +1038,19 @@ class AsyncProcess {
         MultiAction<Row> multiAction = e.getValue();
         incTaskCounters(multiAction.getRegions(), server);
 
-        LOG.info("lchen403: sendMultiAction, server = " + server + ", actions size = " + multiAction.size());
+        LOG.info("lchen403:sendMultiAction, server = " + server + ", actions size = " + multiAction.size());
 
-        Collection<? extends Runnable> runnables = getNewMultiActionRunnable(server, multiAction,
-            numAttempt);
+        Collection<? extends Runnable> runnables = getNewMultiActionRunnable(server, multiAction, numAttempt);
+        LOG.info("lchen403:sendMultiAction, getNewMultiActionRunnable returned"
+        		+ ", runnables.size = " + runnables.size());
+
         // make sure we correctly count the number of runnables before we try to reuse the send
         // thread, in case we had to split the request into different runnables because of backoff
         if (runnables.size() > actionsRemaining) {
           actionsRemaining = runnables.size();
         }
+
+        LOG.info("lchen403:sendMultiAction, actionsRemaining = " + actionsRemaining);
 
         // run all the runnables
         for (Runnable runnable : runnables) {
@@ -1012,7 +1079,9 @@ class AsyncProcess {
       }
 
       if (actionsForReplicaThread != null) {
+        LOG.info("lchen403:sendMultiAction, before calling startWaitingForReplicaCalls");
         startWaitingForReplicaCalls(actionsForReplicaThread);
+        LOG.info("lchen403:sendMultiAction, startWaitingForReplicaCalls returned");
       }
     }
 
@@ -1077,8 +1146,8 @@ class AsyncProcess {
      */
     private void startWaitingForReplicaCalls(List<Action<Row>> actionsForReplicaThread) {
       long startTime = EnvironmentEdgeManager.currentTime();
-      ReplicaCallIssuingRunnable replicaRunnable = new ReplicaCallIssuingRunnable(
-          actionsForReplicaThread, startTime);
+      ReplicaCallIssuingRunnable replicaRunnable = new ReplicaCallIssuingRunnable(actionsForReplicaThread, startTime);
+      LOG.info("replicaRunnableCreated");
       if (primaryCallTimeoutMicroseconds == 0) {
         // Start replica calls immediately.
         replicaRunnable.run();

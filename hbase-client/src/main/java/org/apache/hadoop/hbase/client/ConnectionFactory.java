@@ -28,6 +28,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.UserProvider;
+import org.mortbay.log.Log;
 
 
 /**
@@ -226,6 +227,8 @@ public class ConnectionFactory {
     Class<?> clazz = null;
     try {
       clazz = Class.forName(className);
+	  Log.info("Here is where connection is created!! classname = " + className);
+	  Log.info("Here is where connection is created!! clazz= " + clazz.toString());
     } catch (ClassNotFoundException e) {
       throw new IOException(e);
     }

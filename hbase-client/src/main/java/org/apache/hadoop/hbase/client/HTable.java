@@ -881,11 +881,11 @@ public class HTable implements HTableInterface, RegionLocator {
     long startTime = System.currentTimeMillis();
     LOG.info("lchen403:" + startTime + ", HTable get, Consistency = " + gets.get(0).getConsistency());
 
-    if (gets.size() == 1) {
-      Result[] ret = new Result[]{get(gets.get(0))};
-      LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, HTable get, size is 1");
-      return ret;
-    }
+//    if (gets.size() == 1) {
+//      Result[] ret = new Result[]{get(gets.get(0))};
+//      LOG.info("lchen403:" + (System.currentTimeMillis() - startTime) + " ms, HTable get, size is 1");
+//      return ret;
+//    }
     try {
       Object [] r1 = batch((List)gets);
 
